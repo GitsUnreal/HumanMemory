@@ -3,7 +3,7 @@
 ## Project 1 - Serial Recall Experiment
 
 ### ToDo
-- [ ] Make a GUI
+- [x] Make a GUI
 - [ ] Make a random number generator between 1-99
 - [ ] Make a random serial
 - [ ] Make a checker for correct serial of number
