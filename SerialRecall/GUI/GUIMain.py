@@ -1,5 +1,5 @@
 import tkinter as tk
-from typing import List
+from typing import List, Callable, Optional
 
 
 class GUIMain():
@@ -9,21 +9,23 @@ class GUIMain():
     - After 5 seconds, swaps to 10 input boxes where each box accepts 0-2 digits (0-99)
     """
 
-    def __init__(self, Seriallist = list[int | None]):
+    def __init__(self, Seriallist: Optional[List[int]] = None, on_submit: Optional[Callable[[List[int | None]], None]] = None):
         self.root = tk.Tk()
         self.root.title("Serial Recall")
         self.root.geometry("800x150")
         self.root.resizable(False, False)
 
-        self.Seriallist = Seriallist
+        self.Seriallist = Seriallist or []
+        self.on_submit = on_submit
 
         # Container for content
         self.container = tk.Frame(self.root, padx=10, pady=20)
         self.container.pack(fill=tk.BOTH, expand=True)
 
-        self.placeholder_frame: tk.Frame | None = None
-        self.input_frame: tk.Frame | None = None
-        self.entries: List[tk.Entry] = []
+        self.placeholder_frame = None
+        self.input_frame = None
+        self.entries = []
+        self.buttons_frame = None
 
         self._show_placeholders()
 
@@ -86,6 +88,9 @@ class GUIMain():
         if self.entries:
             self.entries[0].focus_set()
 
+        # Add Submit button below the inputs
+        self.SubmitButton()
+
     def get_values(self) -> List[int | None]:
         """Return the 10 entered values as ints (0-99) or None if empty."""
         values: List[int | None] = []
@@ -101,8 +106,22 @@ class GUIMain():
         return values
     
     def SubmitButton(self):
-        submit_btn = tk.Button(self.root, text="Submit", command=self.get_values)
-        submit_btn.pack(pady=10)
+        if self.buttons_frame is not None:
+            self.buttons_frame.destroy()
+
+        self.buttons_frame = tk.Frame(self.container)
+        self.buttons_frame.pack(pady=10)
+
+        submit_btn = tk.Button(self.buttons_frame, text="Submit", command=self._on_submit)
+        submit_btn.pack()
+
+    def _on_submit(self) -> None:
+        values = self.get_values()
+        # Delegate to external checker if provided; otherwise, just print for now.
+        if self.on_submit is not None:
+            self.on_submit(values)
+        else:
+            print("Submitted values:", values)
 
 
     def run(self) -> None:
