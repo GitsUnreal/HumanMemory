@@ -2,18 +2,20 @@ import tkinter as tk
 from typing import List
 
 
-class GUIMain:
+class GUIMain():
     """
     Simple GUI:
     - Initially shows 10 placeholders: "XX XX ..."
     - After 5 seconds, swaps to 10 input boxes where each box accepts 0-2 digits (0-99)
     """
 
-    def __init__(self):
+    def __init__(self, Seriallist = list[int | None]):
         self.root = tk.Tk()
         self.root.title("Serial Recall")
         self.root.geometry("800x150")
         self.root.resizable(False, False)
+
+        self.Seriallist = Seriallist
 
         # Container for content
         self.container = tk.Frame(self.root, padx=10, pady=20)
@@ -40,7 +42,7 @@ class GUIMain:
         for i in range(10):
             lbl = tk.Label(
                 self.placeholder_frame,
-                text="XX",
+                text= self.Seriallist[i] if i < len(self.Seriallist) else "XX",
                 font=("Segoe UI", 18, "bold"),
                 width=3,
                 anchor="center",
@@ -97,6 +99,11 @@ class GUIMain:
                 except ValueError:
                     values.append(None)
         return values
+    
+    def SubmitButton(self):
+        submit_btn = tk.Button(self.root, text="Submit", command=self.get_values)
+        submit_btn.pack(pady=10)
+
 
     def run(self) -> None:
         self.root.mainloop()
