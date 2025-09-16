@@ -235,7 +235,8 @@ class GUIMain():
             user_input=values,
             first_wrong=first_wrong,
             last_wrong=last_wrong,
-            round_wrong_total=round_wrong_total,
+            numbers_wrong_attempt=round_wrong_total,
+            speed_ms=self.recall_time_ms if self.speed_mode_active else None,
         )
         # Update round counters and decide next action
         if self.memorypattern_active:
