@@ -173,19 +173,20 @@ class GUIMain():
 
     def _on_submit(self) -> None:
         values = self.get_values()
-        # Compute results internally
-        results = self.logic.check_serial(self.Seriallist, values)
-        round_errors = results.count(False)
-        first_wrong = not results[0] if len(results) > 0 else False
-        last_wrong = not results[-1] if len(results) > 0 else False
+        # Only check first and last positions
+        first_val = values[0] if len(values) > 0 else None
+        last_val = values[-1] if len(values) > 0 else None
+        first_wrong = (first_val is None) or (len(self.Seriallist) > 0 and first_val != self.Seriallist[0])
+        last_wrong = (last_val is None) or (len(self.Seriallist) > 0 and last_val != self.Seriallist[-1])
         input_time = None
         if self.input_start_time is not None:
             input_time = time.perf_counter() - self.input_start_time
-        # Feedback
-        if round_errors == 0:
-            self.feedback_label.config(text="Correct!", fg="green")
-        else:
-            self.feedback_label.config(text=f"Wrong ({round_errors} errors)", fg="red")
+        # Feedback (only report first/last status)
+        msg = []
+        msg.append("First OK" if not first_wrong else "First Wrong")
+        msg.append("Last OK" if not last_wrong else "Last Wrong")
+        color = "green" if not first_wrong and not last_wrong else "orange" if (first_wrong != last_wrong) else "red"
+        self.feedback_label.config(text=" | ".join(msg), fg=color)
         # Attempt counter
         self.attempt += 1
         # Log
@@ -194,7 +195,6 @@ class GUIMain():
             mode=self.selected_gamemode.get(),
             serial=self.Seriallist,
             user_input=values,
-            round_errors=round_errors,
             first_wrong=first_wrong,
             last_wrong=last_wrong,
             recall_time_ms=self.recall_time_ms,

@@ -7,12 +7,11 @@ from typing import List
 class GameLogger:
 	"""CSV logger for game attempts.
 
-	Each call to log_attempt writes a row containing cumulative error counts.
+	Tracks only first and last number errors and their cumulative totals.
 	"""
 
 	def __init__(self, file_path: str = "game_log.csv"):
 		self.file_path = file_path
-		self.total_wrong_serials = 0
 		self.total_first_wrong = 0
 		self.total_last_wrong = 0
 
@@ -26,8 +25,8 @@ class GameLogger:
 					"mode",
 					"serial",
 					"user_input",
-					"round_errors",
-					"cumulative_wrong_serials",
+					"first_wrong",
+					"last_wrong",
 					"cumulative_first_wrong",
 					"cumulative_last_wrong",
 					"recall_time_ms",
@@ -40,15 +39,12 @@ class GameLogger:
 		mode: str,
 		serial: List[int],
 		user_input: List[int | None],
-		round_errors: int,
 		first_wrong: bool,
 		last_wrong: bool,
 		recall_time_ms: int,
 		input_time_s: float | None,
 	) -> None:
 		# Update cumulative counters
-		if round_errors > 0:
-			self.total_wrong_serials += 1
 		if first_wrong:
 			self.total_first_wrong += 1
 		if last_wrong:
@@ -62,8 +58,8 @@ class GameLogger:
 				mode,
 				" ".join(map(str, serial)),
 				" ".join("" if v is None else str(v) for v in user_input),
-				round_errors,
-				self.total_wrong_serials,
+				1 if first_wrong else 0,
+				1 if last_wrong else 0,
 				self.total_first_wrong,
 				self.total_last_wrong,
 				recall_time_ms,
