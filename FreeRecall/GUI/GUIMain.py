@@ -4,9 +4,11 @@ from typing import List, Callable, Optional
 try:
     from ..Logging.logger import GameLogger
     from ..Logic.MainLogic import MainLogic
+    from ..MemoryTask.Pattern import PatternGame
 except ImportError:
     from Logging.logger import GameLogger
     from Logic.MainLogic import MainLogic
+    from MemoryTask.Pattern import PatternGame
 
 
 class GUIMain():
@@ -19,7 +21,7 @@ class GUIMain():
     def __init__(self, Seriallist: Optional[List[int]] = None, on_submit: Optional[Callable[[List[int | None]], None]] = None):
         self.root = tk.Tk()
         self.root.title("Serial Recall")
-        self.root.geometry("1000x260")
+        self.root.geometry("1600x900")
         self.root.resizable(False, False)
 
         self.Seriallist = Seriallist or []
@@ -29,11 +31,26 @@ class GUIMain():
         self.logic = MainLogic()
         self.logger = GameLogger()
         self.attempt = 0
-        self.speed_rounds_done = 0
+        # Normal mode rounds
+        self.normal_rounds_done = 0
+        self.normal_rounds_target = 10
+        # Speed mode schedule: 10s x5, 5s x5, 2.5s x5
+        self.speed_schedule_ms = []
+        self.speed_round_index = 0
+        # Legacy counter removed: self.speed_rounds_done
         self.recall_time_ms = 5000  # default reveal time
         self.speed_mode_active = False
+        self.memorypattern_active = False
         self.recall_start_time = None  # for speed mode adaptation
         self.input_start_time = None
+        # MemoryPattern state
+        self.pattern_game = None  # type: ignore[assignment]
+        self.pattern_frame = None
+        self.pattern_buttons = []
+        self.pattern_click_enabled = False
+        self.pattern_reveal_delay_ms = 600  # time each cell is lit
+        self.pattern_gap_ms = 200           # gap between lights
+        self.pattern_entered = []
 
         # Game mode dropdown
         self.gamemodes = ["Normal", "Speed", "MemoryPattern"]
@@ -74,17 +91,30 @@ class GUIMain():
         # Determine mode specifics
         mode = self.selected_gamemode.get()
         self.speed_mode_active = mode == "Speed"
-        if self.speed_mode_active:
+        self.memorypattern_active = mode == "MemoryPattern"
+        # reset per-start counters
+        self.normal_rounds_done = 0
+        self.speed_round_index = 0
+        if self.memorypattern_active:
+            # MemoryPattern flow: show serial first, then pattern, then input
             self.recall_time_ms = 5000
+            self.Seriallist = self.logic.generate_serial()
+            self._show_placeholders()
+            self.recall_start_time = time.perf_counter()
+            self.root.after(self.recall_time_ms, self._start_memorypattern)
         else:
-            self.recall_time_ms = 5000
-        # Generate first serial (always regenerate at start)
-        self.Seriallist = self.logic.generate_serial()
-        # Show placeholders
-        self._show_placeholders()
-        self.recall_start_time = time.perf_counter()
-        # After recall_time swap to inputs
-        self.root.after(self.recall_time_ms, self._swap_to_inputs)
+            if self.speed_mode_active:
+                self.speed_schedule_ms = [10000]*5 + [5000]*5 + [2500]*5
+                self.recall_time_ms = self.speed_schedule_ms[0]
+            else:
+                self.recall_time_ms = 5000
+            # Generate first serial (always regenerate at start)
+            self.Seriallist = self.logic.generate_serial()
+            # Show placeholders
+            self._show_placeholders()
+            self.recall_start_time = time.perf_counter()
+            # After recall_time swap to inputs
+            self.root.after(self.recall_time_ms, self._swap_to_inputs)
 
     def _show_placeholders(self) -> None:
         if self.input_frame is not None:
@@ -119,7 +149,13 @@ class GUIMain():
         if self.placeholder_frame is not None:
             self.placeholder_frame.destroy()
             self.placeholder_frame = None
+        self._show_input_fields()
 
+    def _show_input_fields(self) -> None:
+        # Destroy pattern grid if present
+        if self.pattern_frame is not None:
+            self.pattern_frame.destroy()
+            self.pattern_frame = None
         # Create inputs
         self.input_frame = tk.Frame(self.container)
         self.input_frame.pack()
@@ -138,13 +174,10 @@ class GUIMain():
             ent.grid(row=0, column=i, padx=6)
             self.entries.append(ent)
 
-        # Focus first input
         if self.entries:
             self.entries[0].focus_set()
 
-        # Add Submit button below the inputs
         self.SubmitButton()
-        # Start input timing
         self.input_start_time = time.perf_counter()
 
     def get_values(self) -> List[int | None]:
@@ -189,7 +222,12 @@ class GUIMain():
         self.feedback_label.config(text=" | ".join(msg), fg=color)
         # Attempt counter
         self.attempt += 1
-        # Log
+        # Compute how many numbers are wrong in total (ignoring empty cells)
+        round_wrong_total = 0
+        for i, s in enumerate(self.Seriallist):
+            if i < len(values) and values[i] is not None and s != values[i]:
+                round_wrong_total += 1
+        # Log (per-mode files)
         self.logger.log_attempt(
             attempt=self.attempt,
             mode=self.selected_gamemode.get(),
@@ -197,9 +235,25 @@ class GUIMain():
             user_input=values,
             first_wrong=first_wrong,
             last_wrong=last_wrong,
-            recall_time_ms=self.recall_time_ms,
-            input_time_s=input_time,
+            round_wrong_total=round_wrong_total,
         )
+        # Update round counters and decide next action
+        if self.memorypattern_active:
+            self.memorypattern_rounds_done = getattr(self, 'memorypattern_rounds_done', 0) + 1
+            setattr(self, 'memorypattern_rounds_done', self.memorypattern_rounds_done)
+            if self.memorypattern_rounds_done >= 10:
+                self._finish_mode()
+                return
+        elif self.speed_mode_active:
+            self.speed_round_index += 1
+            if self.speed_round_index >= len(self.speed_schedule_ms):
+                self._finish_mode()
+                return
+        else:
+            self.normal_rounds_done += 1
+            if self.normal_rounds_done >= self.normal_rounds_target:
+                self._finish_mode()
+                return
         # Prepare next round after delay
         self.root.after(3000, self._next_round)
 
@@ -208,18 +262,134 @@ class GUIMain():
         if self.input_frame is not None:
             self.input_frame.destroy()
             self.input_frame = None
-        # Adjust speed mode timing
-        if self.speed_mode_active and self.speed_rounds_done < 10:
-            # Decrease recall time but keep a floor (e.g., 1000 ms)
-            decrement = 400  # 0.4s faster each round
-            self.recall_time_ms = max(1000, self.recall_time_ms - decrement)
-            self.speed_rounds_done += 1
-        # Generate new serial
-        self.Seriallist = self.logic.generate_serial()
-        # Show placeholders
-        self._show_placeholders()
-        self.recall_start_time = time.perf_counter()
-        self.root.after(self.recall_time_ms, self._swap_to_inputs)
+        if self.memorypattern_active:
+            # Start another MemoryPattern round: show serial, then pattern
+            if getattr(self, 'memorypattern_rounds_done', 0) >= 10:
+                self._finish_mode()
+                return
+            self.recall_time_ms = 5000
+            self.Seriallist = self.logic.generate_serial()
+            self._show_placeholders()
+            self.recall_start_time = time.perf_counter()
+            self.root.after(self.recall_time_ms, self._start_memorypattern)
+        else:
+            # Adjust speed mode timing using schedule
+            if self.speed_mode_active:
+                if self.speed_round_index >= len(self.speed_schedule_ms):
+                    self._finish_mode()
+                    return
+                self.recall_time_ms = self.speed_schedule_ms[self.speed_round_index]
+            else:
+                self.recall_time_ms = 5000
+            # Generate new serial
+            self.Seriallist = self.logic.generate_serial()
+            # Show placeholders
+            self._show_placeholders()
+            self.recall_start_time = time.perf_counter()
+            self.root.after(self.recall_time_ms, self._swap_to_inputs)
+
+    def _finish_mode(self):
+        # Clean up UI
+        if self.placeholder_frame is not None:
+            self.placeholder_frame.destroy()
+            self.placeholder_frame = None
+        if self.input_frame is not None:
+            self.input_frame.destroy()
+            self.input_frame = None
+        if self.pattern_frame is not None:
+            self.pattern_frame.destroy()
+            self.pattern_frame = None
+        # Feedback and reset controls
+        mode = "MemoryPattern" if self.memorypattern_active else ("Speed" if self.speed_mode_active else "Normal")
+        self.feedback_label.config(text=f"{mode} completed.", fg="purple")
+        self.gamemode_menu.config(state="normal")
+        self.start_button.config(state="normal")
+        self.game_started = False
+
+    # ---------- MemoryPattern mode ----------
+    def _build_pattern_grid(self):
+        # Destroy numeric UI frames if present
+        if self.placeholder_frame is not None:
+            self.placeholder_frame.destroy()
+            self.placeholder_frame = None
+        if self.input_frame is not None:
+            self.input_frame.destroy()
+            self.input_frame = None
+        if self.buttons_frame is not None:
+            self.buttons_frame.destroy()
+            self.buttons_frame = None
+
+        if self.pattern_frame is None:
+            self.pattern_frame = tk.Frame(self.container)
+            self.pattern_frame.pack(pady=10)
+
+            self.pattern_buttons = []
+            for r in range(3):
+                for c in range(3):
+                    idx = r * 3 + c
+                    btn = tk.Button(
+                        self.pattern_frame,
+                        width=6,
+                        height=3,
+                        bg="#d9d9d9",
+                        activebackground="#cccccc",
+                        relief=tk.RAISED,
+                        command=lambda i=idx: self._on_pattern_click(i),
+                    )
+                    btn.grid(row=r, column=c, padx=6, pady=6)
+                    self.pattern_buttons.append(btn)
+
+    def _start_memorypattern(self):
+        if self.pattern_game is None:
+            self.pattern_game = PatternGame()
+        self._build_pattern_grid()
+        # Generate a new sequence of length 6
+        seq = self.pattern_game.new_round(sequence_len=6)
+        self.pattern_entered = []
+        self.pattern_click_enabled = False
+        # Reveal the sequence
+        self._reveal_sequence(seq, step=0)
+
+    def _reveal_sequence(self, seq: List[int], step: int):
+        # Clear all to default
+        for btn in self.pattern_buttons:
+            btn.configure(bg="#d9d9d9")
+        if step >= len(seq):
+            # Reveal done, enable clicking
+            self.pattern_click_enabled = True
+            return
+        idx = seq[step]
+        # Highlight this cell
+        self.pattern_buttons[idx].configure(bg="#ffd54f")  # amber
+        # Schedule to unhighlight and move to next
+        self.root.after(self.pattern_reveal_delay_ms, lambda: self._after_reveal_gap(seq, step))
+
+    def _after_reveal_gap(self, seq: List[int], step: int):
+        # Turn all off again for the gap
+        for btn in self.pattern_buttons:
+            btn.configure(bg="#d9d9d9")
+        self.root.after(self.pattern_gap_ms, lambda: self._reveal_sequence(seq, step + 1))
+
+    def _on_pattern_click(self, idx: int):
+        if not self.pattern_click_enabled or self.pattern_game is None:
+            return
+        correct, done = self.pattern_game.submit_click(idx)
+        self.pattern_entered.append(idx)
+        if correct:
+            # Flash green briefly
+            self.pattern_buttons[idx].configure(bg="#a5d6a7")
+            self.root.after(150, lambda b=self.pattern_buttons[idx]: b.configure(bg="#d9d9d9"))
+        else:
+            # Flash red and keep waiting for correct one
+            self.pattern_buttons[idx].configure(bg="#ef9a9a")
+            self.root.after(200, lambda b=self.pattern_buttons[idx]: b.configure(bg="#d9d9d9"))
+
+        if done:
+            self.pattern_click_enabled = False
+            # Prompt to enter the serial now
+            self.feedback_label.config(text=f"Pattern complete (mistakes: {self.pattern_game.mistakes}). Enter the serial.", fg="blue")
+            # Switch to input stage after a brief pause
+            self.root.after(500, self._show_input_fields)
 
 
     def run(self) -> None:
