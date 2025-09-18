@@ -20,7 +20,7 @@ class GUIMain():
 
     def __init__(self, Seriallist: Optional[List[int]] = None, on_submit: Optional[Callable[[List[int | None]], None]] = None):
         self.root = tk.Tk()
-        self.root.title("Serial Recall")
+        self.root.title("Free Recall")
         self.root.geometry("1600x900")
         self.root.resizable(False, False)
 
@@ -34,7 +34,7 @@ class GUIMain():
         # Normal mode rounds
         self.normal_rounds_done = 0
         self.normal_rounds_target = 10
-        # Speed mode schedule: 10s x5, 5s x5, 2.5s x5
+    # Speed mode schedule (per-number ms): 5s x5, 3s x5, 1s x5
         self.speed_schedule_ms = []
         self.speed_round_index = 0
         # Legacy counter removed: self.speed_rounds_done
@@ -81,6 +81,11 @@ class GUIMain():
         self.feedback_label.pack(pady=4)
 
         # Do not show placeholders or start timer until Start is clicked
+        # Sequential reveal state
+        self.reveal_index = 0
+        self.reveal_interval_ms = 3000
+        self.reveal_label: tk.Label | None = None
+
     def _on_start(self):
         if self.game_started:
             return
@@ -96,44 +101,106 @@ class GUIMain():
         self.normal_rounds_done = 0
         self.speed_round_index = 0
         if self.memorypattern_active:
-            # MemoryPattern flow: show serial first, then pattern, then input
+            # MemoryPattern flow: sequentially reveal serial, then pattern grid, then input
             self.recall_time_ms = 5000
             self.Seriallist = self.logic.generate_serial()
-            self._show_placeholders()
             self.recall_start_time = time.perf_counter()
-            self.root.after(self.recall_time_ms, self._start_memorypattern)
+            self._start_sequential_reveal(self._start_memorypattern)
         else:
             if self.speed_mode_active:
-                self.speed_schedule_ms = [10000]*5 + [5000]*5 + [2500]*5
+                # Per-number intervals: 5s ×5, 3s ×5, 1s ×5
+                self.speed_schedule_ms = [5000]*5 + [3000]*5 + [1000]*5
                 self.recall_time_ms = self.speed_schedule_ms[0]
             else:
                 self.recall_time_ms = 5000
             # Generate first serial (always regenerate at start)
             self.Seriallist = self.logic.generate_serial()
-            # Show placeholders
-            self._show_placeholders()
             self.recall_start_time = time.perf_counter()
-            # After recall_time swap to inputs
-            self.root.after(self.recall_time_ms, self._swap_to_inputs)
+            # Sequential reveal then swap to inputs
+            self._start_sequential_reveal(self._swap_to_inputs)
 
     def _show_placeholders(self) -> None:
+        # Kept for compatibility; now unused for number reveal
         if self.input_frame is not None:
             self.input_frame.destroy()
             self.input_frame = None
-
+        if self.placeholder_frame is not None:
+            self.placeholder_frame.destroy()
         self.placeholder_frame = tk.Frame(self.container)
         self.placeholder_frame.pack()
-
-        # Create 10 labels horizontally
+        # Show generic placeholders "XX"
         for i in range(10):
             lbl = tk.Label(
                 self.placeholder_frame,
-                text= self.Seriallist[i] if i < len(self.Seriallist) else "XX",
+                text="XX",
                 font=("Segoe UI", 18, "bold"),
                 width=3,
                 anchor="center",
             )
             lbl.grid(row=0, column=i, padx=6)
+
+    def _start_sequential_reveal(self, on_done: Callable[[], None]) -> None:
+        """
+        Show one number at a time with a delay between each.
+        For Normal/MemoryPattern: 3000ms per number.
+        For Speed: derive per-number interval from the schedule (total/len(serial)).
+        """
+        # Clean other frames
+        if self.input_frame is not None:
+            self.input_frame.destroy()
+            self.input_frame = None
+        if self.pattern_frame is not None:
+            self.pattern_frame.destroy()
+            self.pattern_frame = None
+        if self.buttons_frame is not None:
+            self.buttons_frame.destroy()
+            self.buttons_frame = None
+        if self.placeholder_frame is not None:
+            self.placeholder_frame.destroy()
+            self.placeholder_frame = None
+
+        # Compute per-number interval
+        if self.speed_mode_active:
+            # Use the per-number interval from the speed schedule directly
+            self.reveal_interval_ms = max(1, int(self.recall_time_ms))
+        else:
+            self.reveal_interval_ms = 3000
+
+        # Build a centered big label for reveal
+        self.placeholder_frame = tk.Frame(self.container)
+        self.placeholder_frame.pack(expand=True)
+        if self.reveal_label is not None:
+            try:
+                self.reveal_label.destroy()
+            except Exception:
+                pass
+        self.reveal_label = tk.Label(
+            self.placeholder_frame,
+            text="",
+            font=("Segoe UI", 64, "bold"),
+            width=6,
+            anchor="center",
+        )
+        self.reveal_label.pack(pady=20)
+        self.feedback_label.config(text="Memorize the numbers...", fg="black")
+
+        # Start reveal loop
+        self.reveal_index = 0
+        def step():
+            if self.reveal_label is None:
+                return
+            if self.reveal_index >= len(self.Seriallist):
+                # Finished; clear label and continue
+                self.reveal_label.config(text="")
+                on_done()
+                return
+            # Show current number
+            num = self.Seriallist[self.reveal_index]
+            self.reveal_label.config(text=str(num))
+            self.reveal_index += 1
+            self.root.after(self.reveal_interval_ms, step)
+        # Kick off immediately
+        step()
 
     def _validate_two_digits(self, proposed: str) -> bool:
         """
@@ -270,9 +337,8 @@ class GUIMain():
                 return
             self.recall_time_ms = 5000
             self.Seriallist = self.logic.generate_serial()
-            self._show_placeholders()
             self.recall_start_time = time.perf_counter()
-            self.root.after(self.recall_time_ms, self._start_memorypattern)
+            self._start_sequential_reveal(self._start_memorypattern)
         else:
             # Adjust speed mode timing using schedule
             if self.speed_mode_active:
@@ -284,16 +350,21 @@ class GUIMain():
                 self.recall_time_ms = 5000
             # Generate new serial
             self.Seriallist = self.logic.generate_serial()
-            # Show placeholders
-            self._show_placeholders()
             self.recall_start_time = time.perf_counter()
-            self.root.after(self.recall_time_ms, self._swap_to_inputs)
+            # Sequential reveal then inputs
+            self._start_sequential_reveal(self._swap_to_inputs)
 
     def _finish_mode(self):
         # Clean up UI
         if self.placeholder_frame is not None:
             self.placeholder_frame.destroy()
             self.placeholder_frame = None
+        if self.reveal_label is not None:
+            try:
+                self.reveal_label.destroy()
+            except Exception:
+                pass
+            self.reveal_label = None
         if self.input_frame is not None:
             self.input_frame.destroy()
             self.input_frame = None
