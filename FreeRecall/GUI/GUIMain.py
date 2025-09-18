@@ -3,8 +3,8 @@ import time
 from typing import List, Callable, Optional
 
 # Centralized timing configuration (preserve current behavior)
-NORMAL_REVEAL_MS = 300  # per-number duration for Normal/MemoryPattern
-SPEED_SCHEDULE_MS = [5000] * 5 + [3000] * 5 + [1000] * 5  # per-number durations per round
+NORMAL_REVEAL_MS = 1000  # per-number duration for Normal/MemoryPattern
+SPEED_SCHEDULE_MS = [1500] * 5 + [1000] * 5 + [500] * 5  # per-number durations per round
 try:
     from ..Logging.logger import GameLogger
     from ..Logic.MainLogic import MainLogic
