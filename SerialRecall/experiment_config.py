@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 @dataclass
 class Timing:
-    item_on_ms: int = 750         # duration each item is shown
-    isi_blank_ms: int = 250       # blank between items
+    item_on_ms: int = 1000         # duration each item is shown
+    isi_blank_ms: int = 0       # blank between items
     retention_ms: int = 200      # retention interval (default; overrides in certain tasks)
     iti_ms: int = 200             # inter-trial interval
 
