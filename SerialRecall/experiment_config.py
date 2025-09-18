@@ -11,9 +11,9 @@ class Timing:
 
 @dataclass
 class Design:
-    trials_per_condition: int = 1
+    trials_per_condition: int = 5
     # Choose one fixed list length or a list of possible lengths to randomize from:
-    list_lengths = [5]            # classic span length; can change e.g., [5,6,7,8,9]
+    list_lengths = [10]            # classic span length; can change e.g., [5,6,7,8,9]
     randomize_block_order: bool = False
     # Item mode for baseline/error/suppression/tapping: "letters" or "digits" (letters match literature here)
     item_mode: str = "letters"
