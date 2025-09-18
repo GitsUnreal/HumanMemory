@@ -1,6 +1,10 @@
 import tkinter as tk
 import time
 from typing import List, Callable, Optional
+
+# Centralized timing configuration (preserve current behavior)
+NORMAL_REVEAL_MS = 300  # per-number duration for Normal/MemoryPattern
+SPEED_SCHEDULE_MS = [5000] * 5 + [3000] * 5 + [1000] * 5  # per-number durations per round
 try:
     from ..Logging.logger import GameLogger
     from ..Logic.MainLogic import MainLogic
@@ -86,8 +90,19 @@ class GUIMain():
         # Label used for sequential reveal
         self.reveal_label = None
         # Reveal timing (Normal/Pattern)
-        self.reveal_show_ms = 3000
+        self.reveal_show_ms = NORMAL_REVEAL_MS
         self.reveal_gap_ms = 0
+
+    def _destroy_frames(self, *names: str) -> None:
+        """Utility to destroy and None-out UI frames by attribute name."""
+        for name in names:
+            frame = getattr(self, name, None)
+            if frame is not None:
+                try:
+                    frame.destroy()
+                except Exception:
+                    pass
+                setattr(self, name, None)
 
     def _on_start(self):
         if self.game_started:
@@ -111,8 +126,8 @@ class GUIMain():
             self._start_sequential_reveal(self._start_memorypattern)
         else:
             if self.speed_mode_active:
-                # Per-number intervals: 5s ×5, 3s ×5, 1s ×5
-                self.speed_schedule_ms = [5000]*5 + [3000]*5 + [1000]*5
+                # Per-number intervals from centralized schedule
+                self.speed_schedule_ms = SPEED_SCHEDULE_MS.copy()
                 self.recall_time_ms = self.speed_schedule_ms[0]
             else:
                 self.recall_time_ms = 5000
@@ -122,25 +137,7 @@ class GUIMain():
             # Sequential reveal then swap to inputs
             self._start_sequential_reveal(self._swap_to_inputs)
 
-    def _show_placeholders(self) -> None:
-        # Kept for compatibility; now unused for number reveal
-        if self.input_frame is not None:
-            self.input_frame.destroy()
-            self.input_frame = None
-        if self.placeholder_frame is not None:
-            self.placeholder_frame.destroy()
-        self.placeholder_frame = tk.Frame(self.container)
-        self.placeholder_frame.pack()
-        # Show generic placeholders "XX"
-        for i in range(10):
-            lbl = tk.Label(
-                self.placeholder_frame,
-                text="XX",
-                font=("Segoe UI", 18, "bold"),
-                width=3,
-                anchor="center",
-            )
-            lbl.grid(row=0, column=i, padx=6)
+    # _show_placeholders removed; sequential reveal is used instead
 
     def _start_sequential_reveal(self, on_done: Callable[[], None]) -> None:
         """
@@ -149,18 +146,7 @@ class GUIMain():
         For Speed: derive per-number interval from the schedule (total/len(serial)).
         """
         # Clean other frames
-        if self.input_frame is not None:
-            self.input_frame.destroy()
-            self.input_frame = None
-        if self.pattern_frame is not None:
-            self.pattern_frame.destroy()
-            self.pattern_frame = None
-        if self.buttons_frame is not None:
-            self.buttons_frame.destroy()
-            self.buttons_frame = None
-        if self.placeholder_frame is not None:
-            self.placeholder_frame.destroy()
-            self.placeholder_frame = None
+        self._destroy_frames("input_frame", "pattern_frame", "buttons_frame", "placeholder_frame")
 
         # Compute per-number interval/timings
         if self.speed_mode_active:
@@ -168,8 +154,8 @@ class GUIMain():
             self.reveal_show_ms = max(1, int(self.recall_time_ms))
             self.reveal_gap_ms = 0
         else:
-            # Normal and MemoryPattern (3s per number, no gap)
-            self.reveal_show_ms = 3000
+            # Normal and MemoryPattern (per-number duration, no gap)
+            self.reveal_show_ms = NORMAL_REVEAL_MS
             self.reveal_gap_ms = 0
 
         # Build a centered big label for reveal
@@ -228,9 +214,7 @@ class GUIMain():
 
     def _show_input_fields(self) -> None:
         # Destroy pattern grid if present
-        if self.pattern_frame is not None:
-            self.pattern_frame.destroy()
-            self.pattern_frame = None
+        self._destroy_frames("pattern_frame")
         # Create inputs
         self.input_frame = tk.Frame(self.container)
         self.input_frame.pack()
@@ -335,9 +319,7 @@ class GUIMain():
 
     def _next_round(self):
         # Cleanup existing input frame
-        if self.input_frame is not None:
-            self.input_frame.destroy()
-            self.input_frame = None
+        self._destroy_frames("input_frame")
         if self.memorypattern_active:
             # Start another MemoryPattern round: show serial, then pattern
             if getattr(self, 'memorypattern_rounds_done', 0) >= 10:
@@ -364,21 +346,14 @@ class GUIMain():
 
     def _finish_mode(self):
         # Clean up UI
-        if self.placeholder_frame is not None:
-            self.placeholder_frame.destroy()
-            self.placeholder_frame = None
+        self._destroy_frames("placeholder_frame")
         if self.reveal_label is not None:
             try:
                 self.reveal_label.destroy()
             except Exception:
                 pass
             self.reveal_label = None
-        if self.input_frame is not None:
-            self.input_frame.destroy()
-            self.input_frame = None
-        if self.pattern_frame is not None:
-            self.pattern_frame.destroy()
-            self.pattern_frame = None
+        self._destroy_frames("input_frame", "pattern_frame")
         # Feedback and reset controls
         mode = "MemoryPattern" if self.memorypattern_active else ("Speed" if self.speed_mode_active else "Normal")
         self.feedback_label.config(text=f"{mode} completed.", fg="purple")
