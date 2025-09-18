@@ -83,8 +83,11 @@ class GUIMain():
         # Do not show placeholders or start timer until Start is clicked
         # Sequential reveal state
         self.reveal_index = 0
-        self.reveal_interval_ms = 3000
-        self.reveal_label: tk.Label | None = None
+        # Label used for sequential reveal
+        self.reveal_label = None
+        # Reveal timing (Normal/Pattern)
+        self.reveal_show_ms = 3000
+        self.reveal_gap_ms = 0
 
     def _on_start(self):
         if self.game_started:
@@ -159,12 +162,15 @@ class GUIMain():
             self.placeholder_frame.destroy()
             self.placeholder_frame = None
 
-        # Compute per-number interval
+        # Compute per-number interval/timings
         if self.speed_mode_active:
-            # Use the per-number interval from the speed schedule directly
-            self.reveal_interval_ms = max(1, int(self.recall_time_ms))
+            # Use the per-number interval from the speed schedule directly (no gap in Speed mode)
+            self.reveal_show_ms = max(1, int(self.recall_time_ms))
+            self.reveal_gap_ms = 0
         else:
-            self.reveal_interval_ms = 3000
+            # Normal and MemoryPattern (3s per number, no gap)
+            self.reveal_show_ms = 3000
+            self.reveal_gap_ms = 0
 
         # Build a centered big label for reveal
         self.placeholder_frame = tk.Frame(self.container)
@@ -180,27 +186,29 @@ class GUIMain():
             font=("Segoe UI", 64, "bold"),
             width=6,
             anchor="center",
+            bg="#ffffff",
         )
         self.reveal_label.pack(pady=20)
         self.feedback_label.config(text="Memorize the numbers...", fg="black")
 
-        # Start reveal loop
+        # Start reveal loop (show phase then gap phase)
         self.reveal_index = 0
-        def step():
+        def show_step():
             if self.reveal_label is None:
                 return
             if self.reveal_index >= len(self.Seriallist):
-                # Finished; clear label and continue
-                self.reveal_label.config(text="")
+                # No more numbers, finish
                 on_done()
                 return
-            # Show current number
             num = self.Seriallist[self.reveal_index]
-            self.reveal_label.config(text=str(num))
             self.reveal_index += 1
-            self.root.after(self.reveal_interval_ms, step)
+            # Show current number
+            self.reveal_label.config(text=str(num))
+            # After show duration, go to next
+            self.root.after(self.reveal_show_ms, show_step)
+
         # Kick off immediately
-        step()
+        show_step()
 
     def _validate_two_digits(self, proposed: str) -> bool:
         """
