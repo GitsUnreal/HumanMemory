@@ -25,10 +25,9 @@ This repo contains a **tkinter-based** set of experiments to replicate classic f
 
 ## Conditions (blocks)
 1. **Baseline** (letters; no secondary task)
-2. **Error Type** (letters drawn from sets that include **phonologically similar** and **visually similar** letters to analyze confusion patterns)
-3. **Chunking** (items = 3-letter high-frequency words; no secondary task)
-4. **Articulatory Suppression** (letters; during retention, participants silently repeat “tah-dah” for **10 s**)
-5. **Finger Tapping** (letters; during retention, participants tap SPACE for **10 s**; the task requires at least one tap to proceed)
+2. **Chunking** (items = 3-letter high-frequency words; no secondary task)
+3. **Articulatory Suppression** (letters; during retention, participants silently repeat “tah-dah” for **10 s**)
+4. **Finger Tapping** (letters; during retention, participants tap SPACE for **10 s**; the task requires at least one tap to proceed)
 
 > Notes:
 > - All trials are **serial recall**: items appear one-by-one (no fixation symbol), then a retention interval, then the response screen.
