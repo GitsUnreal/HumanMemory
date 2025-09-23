@@ -20,3 +20,10 @@
 - In Normal mode: each number is shown for 3 seconds before moving to the next.
 - In Speed mode: each number duration follows the schedule 5s ×5 rounds, 3s ×5 rounds, 1s ×5 rounds.
 - In MemoryPattern mode: the serial is also shown sequentially (3 seconds per number) before the pattern grid appears.
+
+
+
+# Data
+- Confidence Interval
+- Histogram
+- Graph over speedup
