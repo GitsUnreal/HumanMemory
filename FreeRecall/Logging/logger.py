@@ -36,6 +36,7 @@ class GameLogger:
 					"attempt",
 					"serial",
 					"user_input",
+					"pattern_correct",  # new column for MemoryPattern mode
 					"first_wrong_attempt",
 					"last_wrong_attempt",
 					"numbers_wrong_attempt",
@@ -55,6 +56,7 @@ class GameLogger:
 		last_wrong: bool,
 		numbers_wrong_attempt: int,
 		speed_ms: int | None = None,
+		pattern_correct: bool | None = None,
 	) -> None:
 		# Prepare file and counters
 		self._ensure_header(mode)
@@ -78,6 +80,7 @@ class GameLogger:
 				attempt,
 				" ".join(map(str, serial)),
 				" ".join("" if v is None else str(v) for v in user_input),
+				(1 if pattern_correct else 0) if pattern_correct is not None else "",
 				1 if first_wrong else 0,
 				1 if last_wrong else 0,
 				int(numbers_wrong_attempt),

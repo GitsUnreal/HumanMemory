@@ -287,6 +287,12 @@ class GUIMain():
             if i < len(values) and values[i] is not None and s != values[i]:
                 round_wrong_total += 1
         # Log (per-mode files)
+        # Determine if pattern was correct (for MemoryPattern mode)
+        pattern_correct = None
+        if self.memorypattern_active:
+            # Compare entered pattern to the generated one
+            if hasattr(self, "pattern_game") and self.pattern_game is not None:
+                pattern_correct = self.pattern_entered == self.pattern_game.get_sequence()
         self.logger.log_attempt(
             attempt=self.attempt,
             mode=self.selected_gamemode.get(),
@@ -296,6 +302,7 @@ class GUIMain():
             last_wrong=last_wrong,
             numbers_wrong_attempt=round_wrong_total,
             speed_ms=self.recall_time_ms if self.speed_mode_active else None,
+            pattern_correct=pattern_correct,
         )
         # Update round counters and decide next action
         if self.memorypattern_active:
@@ -425,6 +432,7 @@ class GUIMain():
             btn.configure(bg="#d9d9d9")
         self.root.after(self.pattern_gap_ms, lambda: self._reveal_sequence(seq, step + 1))
 
+
     def _on_pattern_click(self, idx: int):
         if not self.pattern_click_enabled or self.pattern_game is None:
             return
@@ -439,11 +447,11 @@ class GUIMain():
             self.pattern_buttons[idx].configure(bg="#ef9a9a")
             self.root.after(200, lambda b=self.pattern_buttons[idx]: b.configure(bg="#d9d9d9"))
 
-        if done:
+        # Always proceed after as many clicks as the pattern length, regardless of correctness
+        pattern_length = len(self.pattern_game.get_sequence())
+        if len(self.pattern_entered) >= pattern_length:
             self.pattern_click_enabled = False
-            # Prompt to enter the serial now
             self.feedback_label.config(text=f"Pattern complete (mistakes: {self.pattern_game.mistakes}). Enter the serial.", fg="blue")
-            # Switch to input stage after a brief pause
             self.root.after(500, self._show_input_fields)
 
 
