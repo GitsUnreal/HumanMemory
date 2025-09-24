@@ -1,2 +1,0 @@
-timestamp,attempt,serial,user_input,pattern_correct,first_wrong_attempt,last_wrong_attempt,numbers_wrong_attempt,first_wrong_total,last_wrong_total,numbers_wrong_total,speed_ms
-2025-09-24T21:04:32.116687,1,88 61 49 56 18 11 20 15 42 96,42 42 42 42 42 42 42   ,,1,1,7,1,1,7,
