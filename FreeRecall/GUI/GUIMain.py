@@ -37,8 +37,8 @@ class GUIMain():
         self.attempt = 0
         # Normal mode rounds
         self.normal_rounds_done = 0
-        self.normal_rounds_target = 10
-    # Speed mode schedule (per-number ms): 5s x5, 3s x5, 1s x5
+        self.normal_rounds_target = 5
+        # Speed mode schedule (per-number ms): 5s x5, 3s x5, 1s x5
         self.speed_schedule_ms = []
         self.speed_round_index = 0
         # Legacy counter removed: self.speed_rounds_done
@@ -308,7 +308,7 @@ class GUIMain():
         if self.memorypattern_active:
             self.memorypattern_rounds_done = getattr(self, 'memorypattern_rounds_done', 0) + 1
             setattr(self, 'memorypattern_rounds_done', self.memorypattern_rounds_done)
-            if self.memorypattern_rounds_done >= 10:
+            if self.memorypattern_rounds_done >= 5:
                 self._finish_mode()
                 return
         elif self.speed_mode_active:
@@ -329,7 +329,7 @@ class GUIMain():
         self._destroy_frames("input_frame")
         if self.memorypattern_active:
             # Start another MemoryPattern round: show serial, then pattern
-            if getattr(self, 'memorypattern_rounds_done', 0) >= 10:
+            if getattr(self, 'memorypattern_rounds_done', 0) >= 5:
                 self._finish_mode()
                 return
             self.recall_time_ms = 5000
