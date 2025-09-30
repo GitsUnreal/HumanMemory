@@ -1,95 +1,172 @@
-# Basic analysis for serial recall experiments
-import os
-import json
-import math
+"""
+Aggregate serial recall experiment results by condition and compute:
+- count
+- mean of n_correct
+- quartiles (Q1, median, Q3)
+- 95% confidence interval for the mean (t-based if SciPy is available; normal 1.96 fallback otherwise)
+
+Input is assumed to be at: data/serial_recall_log.csv
+Outputs:
+- data/analysis.csv (summary stats per condition)
+- data/errors_top10.csv (top-10 letter-substitution errors pooled across all conditions, excluding 'chunking_words')
+"""
+
+import re
+from collections import Counter
+from pathlib import Path
 import pandas as pd
 import numpy as np
-from collections import Counter, defaultdict
-from experiment_config import LOG_DIR, LOG_FILE
 
-DATA_PATH = os.path.join(LOG_DIR, LOG_FILE)
-OUT_SUMMARY = os.path.join(LOG_DIR, "summary_by_condition.csv")
-CONFUSION_DIR = os.path.join(LOG_DIR, "confusions")
+EXPECTED_LABELS = {
+    "baseline_letters",
+    "chunking_word",
+    "chunking_words",  # in case the file uses plural
+    "articulatory_suppression",
+    "finger_tapping",
+}
 
-def wilson_ci(k, n, alpha=0.05):
+TYPE_GUESS_COLUMNS = ["condition", "experiment_type", "experiment", "type"]
+SCORE_GUESS_COLUMNS = ["n_correct", "correct", "num_correct", "nCorrect", "N_correct"]
+
+
+def find_type_column(df: pd.DataFrame) -> str:
+    for col in df.columns:
+        vals = set(str(v) for v in df[col].dropna().unique())
+        if any(label in vals for label in EXPECTED_LABELS):
+            return col
+    for guess in TYPE_GUESS_COLUMNS:
+        if guess in df.columns:
+            return guess
+    raise ValueError("Couldn't find experiment type column.")
+
+
+def find_score_column(df: pd.DataFrame) -> str:
+    for guess in SCORE_GUESS_COLUMNS:
+        if guess in df.columns:
+            return guess
+    candidates = [c for c in df.columns if c.lower().startswith("n_") or "correct" in c.lower()]
+    if candidates:
+        return candidates[0]
+    raise ValueError("Couldn't find n_correct column.")
+
+
+def mean_ci_95(series: pd.Series):
+    x = series.dropna().astype(float).values
+    n = len(x)
     if n == 0:
-        return (0.0, 0.0)
-    z = 1.959963984540054 # approx for 95%
-    phat = k / n
-    denom = 1 + z**2/n
-    center = (phat + z*z/(2*n)) / denom
-    margin = z*math.sqrt(phat*(1-phat)/n + z*z/(4*n*n)) / denom
-    return (max(0.0, center - margin), min(1.0, center + margin))
+        return (np.nan, np.nan, np.nan)
+    mean = float(np.mean(x))
+    if n == 1:
+        return (mean, np.nan, np.nan)
 
-def explode_pos_correct(df):
+    sd = float(np.std(x, ddof=1))
+    sem = sd / np.sqrt(n)
+
+    try:
+        from scipy.stats import t
+        tcrit = float(t.ppf(0.975, df=n - 1))
+    except Exception:
+        tcrit = 1.96
+
+    margin = tcrit * sem
+    return (mean, mean - margin, mean + margin)
+
+
+def compute_summary(df: pd.DataFrame, type_col: str, score_col: str) -> pd.DataFrame:
+    df = df.copy()
+    df[score_col] = pd.to_numeric(df[score_col], errors="coerce")
+
+    grouped = df.groupby(type_col)[score_col]
+
     rows = []
-    for _, r in df.iterrows():
-        pos = json.loads(r["pos_correct"])
-        for i, v in enumerate(pos):
-            rows.append({"condition": r["condition"], "participant": r["participant"], "position": i+1, "correct": v})
+    for gname, s in grouped:
+        q1 = float(s.quantile(0.25)) if s.notna().any() else np.nan
+        q2 = float(s.quantile(0.50)) if s.notna().any() else np.nan
+        q3 = float(s.quantile(0.75)) if s.notna().any() else np.nan
+        mean, ci_low, ci_high = mean_ci_95(s)
+        count = int(s.dropna().shape[0])
+        rows.append({
+            "experiment_type": str(gname),
+            "n": count,
+            "mean_n_correct": mean,
+            "q1": q1,
+            "median": q2,
+            "q3": q3,
+            "ci95_low": ci_low,
+            "ci95_high": ci_high,
+        })
+
+    out = pd.DataFrame(rows).sort_values("experiment_type").reset_index(drop=True)
+    return out
+
+
+def _letters_from_piped_string(s: str):
+    if not isinstance(s, str):
+        return []
+    letters = re.findall(r"\|([A-Za-z])\|", s)
+    return [ch.upper() for ch in letters]
+
+
+def compute_top_errors(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Count letter-substitution errors pooled across all conditions, excluding 'chunking_words'.
+    """
+    if "condition" not in df.columns:
+        raise ValueError("Expected a 'condition' column to filter by experiment type.")
+
+    filt = df["condition"].astype(str) != "chunking_words"
+    sub = df.loc[filt].copy()
+
+    counter = Counter()
+    for _, row in sub.iterrows():
+        tgt_letters = _letters_from_piped_string(row.get("target", ""))
+        resp_letters = _letters_from_piped_string(row.get("response", ""))
+        m = min(len(tgt_letters), len(resp_letters))
+        for i in range(m):
+            t, r = tgt_letters[i], resp_letters[i]
+            if r and t and r != t and r.isalpha():
+                key = f"{r} instead of {t}"
+                counter[key] += 1
+
+    top = counter.most_common(10)
+    rows = [{"error": err, "count": cnt, "rank": rank} for rank, (err, cnt) in enumerate(top, start=1)]
     return pd.DataFrame(rows)
 
-def summarize(df):
-    g = df.groupby("condition").agg(
-        trials=("prop_correct", "count"),
-        mean_prop=("prop_correct", "mean")
-    ).reset_index()
-    ci_lo = []
-    ci_hi = []
-    for _, row in g.iterrows():
-        sub = df[df["condition"] == row["condition"]]
-        total_correct = int(sub["n_correct"].sum())
-        total_positions = int((sub["target_length"]).sum())
-        lo, hi = wilson_ci(total_correct, total_positions)
-        ci_lo.append(lo)
-        ci_hi.append(hi)
-    g["ci95_lo"] = ci_lo
-    g["ci95_hi"] = ci_hi
-    return g
-
-def confusion_matrices(df):
-    os.makedirs(CONFUSION_DIR, exist_ok=True)
-    for cond, sub in df[df["is_words"] == 0].groupby("condition"):
-        counts = defaultdict(Counter)
-        for _, r in sub.iterrows():
-            target = r["target"].split("||")
-            resp = r["response"].split("||")
-            L = max(len(target), len(resp))
-            for i in range(L):
-                t = target[i] if i < len(target) else None
-                s = resp[i] if i < len(resp) else None
-                if t is None: continue
-                if s is None: s = "<MISSING>"
-                counts[t][s] += 1
-        labels = sorted(set(k for k in counts.keys()) | set(x for c in counts.values() for x in c.keys()))
-        mat = pd.DataFrame(0, index=labels, columns=labels)
-        for t, row in counts.items():
-            for s, v in row.items():
-                if s not in mat.columns:
-                    mat[s] = 0
-                mat.loc[t, s] = v
-        mat.to_csv(os.path.join(CONFUSION_DIR, f"confusion_{cond}.csv"))
 
 def main():
-    if not os.path.exists(DATA_PATH):
-        print(f"No data found at {DATA_PATH}")
-        return
-    df = pd.read_csv(DATA_PATH)
-    summ = summarize(df)
-    print("=== Summary by condition ===")
-    print(summ)
-    summ.to_csv(OUT_SUMMARY, index=False)
+    input_path = Path("data/serial_recall_log.csv")
+    output_path = Path("data/analysis.csv")
 
-    gp = df.groupby(["participant", "condition"]).agg(
-        trials=("prop_correct", "count"),
-        mean_prop=("prop_correct", "mean")
-    ).reset_index()
-    print("\n=== By participant & condition ===")
-    print(gp)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input CSV not found: {input_path}")
 
-    confusion_matrices(df)
-    print(f"\nSaved confusion matrices in {CONFUSION_DIR}")
-    print(f"\nSummary CSV saved to {OUT_SUMMARY}")
+    df = pd.read_csv(input_path)
+    type_col = find_type_column(df)
+    score_col = find_score_column(df)
+
+    # Summary stats
+    summary = compute_summary(df, type_col, score_col)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(output_path, index=False)
+
+    # Error analysis (pooled, excluding chunking_words)
+    errors_df = compute_top_errors(df)
+    errors_path = Path("data/errors_top10.csv")
+    errors_df.to_csv(errors_path, index=False)
+
+    pd.set_option("display.max_columns", None)
+    print(f"\nDetected type column: {type_col}")
+    print(f"Detected score column: {score_col}")
+    print(f"Saved summary to: {output_path}")
+    print(f"Saved error analysis to: {errors_path}\n")
+    print("Summary (per condition):")
+    print(summary.to_string(index=False))
+    if not errors_df.empty:
+        print("\nTop-10 errors (pooled across all conditions, excluding 'chunking_words'):")
+        print(errors_df.to_string(index=False))
+    else:
+        print("\n(No errors found)")
+
 
 if __name__ == "__main__":
     main()
