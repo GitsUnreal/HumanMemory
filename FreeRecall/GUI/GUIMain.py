@@ -45,6 +45,7 @@ class GUIMain():
         self.recall_time_ms = 5000  # default reveal time
         self.speed_mode_active = False
         self.memorypattern_active = False
+        self.pause_mode_active = False
         self.recall_start_time = None  # for speed mode adaptation
         self.input_start_time = None
         # MemoryPattern state
@@ -57,7 +58,7 @@ class GUIMain():
         self.pattern_entered = []
 
         # Game mode dropdown
-        self.gamemodes = ["Normal", "Speed", "MemoryPattern"]
+        self.gamemodes = ["Normal", "Speed", "MemoryPattern", "Pause"]
         self.selected_gamemode = tk.StringVar(value=self.gamemodes[0])
         self.dropdown_frame = tk.Frame(self.root)
         self.dropdown_frame.pack(fill=tk.X, padx=10, pady=(10, 0))
@@ -115,15 +116,24 @@ class GUIMain():
         mode = self.selected_gamemode.get()
         self.speed_mode_active = mode == "Speed"
         self.memorypattern_active = mode == "MemoryPattern"
+        self.pause_mode_active = mode == "Pause"
         # reset per-start counters
         self.normal_rounds_done = 0
         self.speed_round_index = 0
+        if hasattr(self, 'pause_rounds_done'):
+            self.pause_rounds_done = 0
         if self.memorypattern_active:
             # MemoryPattern flow: sequentially reveal serial, then pattern grid, then input
             self.recall_time_ms = 5000
             self.Seriallist = self.logic.generate_serial()
             self.recall_start_time = time.perf_counter()
             self._start_sequential_reveal(self._start_memorypattern)
+        elif self.pause_mode_active:
+            # Pause mode: sequentially reveal serial, then 5-second pause, then input
+            self.recall_time_ms = 5000
+            self.Seriallist = self.logic.generate_serial()
+            self.recall_start_time = time.perf_counter()
+            self._start_sequential_reveal(self._start_pause_delay)
         else:
             if self.speed_mode_active:
                 # Per-number intervals from centralized schedule
@@ -212,6 +222,35 @@ class GUIMain():
             self.placeholder_frame = None
         self._show_input_fields()
 
+    def _start_pause_delay(self) -> None:
+        """Handle the 5-second pause before showing input fields in Pause mode."""
+        # Remove placeholders/reveal elements
+        if self.placeholder_frame is not None:
+            self.placeholder_frame.destroy()
+            self.placeholder_frame = None
+        if self.reveal_label is not None:
+            try:
+                self.reveal_label.destroy()
+            except Exception:
+                pass
+            self.reveal_label = None
+        
+        # Show pause message
+        self.placeholder_frame = tk.Frame(self.container)
+        self.placeholder_frame.pack(expand=True)
+        
+        pause_label = tk.Label(
+            self.placeholder_frame,
+            text="Please wait...",
+            font=("Segoe UI", 32, "bold"),
+            fg="blue"
+        )
+        pause_label.pack(pady=20)
+        self.feedback_label.config(text="5 second pause before input", fg="blue")
+        
+        # After 5 seconds, show input fields
+        self.root.after(5000, self._swap_to_inputs)
+
     def _show_input_fields(self) -> None:
         # Destroy pattern grid if present
         self._destroy_frames("pattern_frame")
@@ -265,42 +304,49 @@ class GUIMain():
 
     def _on_submit(self) -> None:
         values = self.get_values()
-        # Only check first and last positions
-        first_val = values[0] if len(values) > 0 else None
-        last_val = values[-1] if len(values) > 0 else None
-        first_wrong = (first_val is None) or (len(self.Seriallist) > 0 and first_val != self.Seriallist[0])
-        last_wrong = (last_val is None) or (len(self.Seriallist) > 0 and last_val != self.Seriallist[-1])
+        
+        # Calculate correct numbers using proper free recall methodology
+        correct_numbers = self.logger.calculate_correct_numbers(self.Seriallist, values)
+        first_correct, last_correct = self.logger.calculate_first_last_correct(self.Seriallist, values)
+        
         input_time = None
         if self.input_start_time is not None:
             input_time = time.perf_counter() - self.input_start_time
-        # Feedback (only report first/last status)
+            
+        # Feedback (show correct numbers and first/last status)
         msg = []
-        msg.append("First OK" if not first_wrong else "First Wrong")
-        msg.append("Last OK" if not last_wrong else "Last Wrong")
-        color = "green" if not first_wrong and not last_wrong else "orange" if (first_wrong != last_wrong) else "red"
+        msg.append(f"Correct: {correct_numbers}/{len(self.Seriallist)}")
+        msg.append("First ✓" if first_correct else "First ✗")
+        msg.append("Last ✓" if last_correct else "Last ✗")
+        
+        # Color based on performance
+        if correct_numbers == len(self.Seriallist):
+            color = "green"  # Perfect recall
+        elif correct_numbers >= len(self.Seriallist) * 0.7:
+            color = "blue"   # Good performance (70%+)
+        elif correct_numbers >= len(self.Seriallist) * 0.4:
+            color = "orange" # Moderate performance (40-70%)
+        else:
+            color = "red"    # Poor performance (<40%)
+            
         self.feedback_label.config(text=" | ".join(msg), fg=color)
+        
         # Attempt counter
         self.attempt += 1
-        # Compute how many numbers are wrong in total (ignoring empty cells)
-        round_wrong_total = 0
-        for i, s in enumerate(self.Seriallist):
-            if i < len(values) and values[i] is not None and s != values[i]:
-                round_wrong_total += 1
-        # Log (per-mode files)
+        
         # Determine if pattern was correct (for MemoryPattern mode)
         pattern_correct = None
         if self.memorypattern_active:
             # Compare entered pattern to the generated one
             if hasattr(self, "pattern_game") and self.pattern_game is not None:
                 pattern_correct = self.pattern_entered == self.pattern_game.get_sequence()
-        self.logger.log_attempt(
+                
+        # Log using the new auto-calculate method (much simpler!)
+        self.logger.log_attempt_auto_calculate(
             attempt=self.attempt,
             mode=self.selected_gamemode.get(),
             serial=self.Seriallist,
             user_input=values,
-            first_wrong=first_wrong,
-            last_wrong=last_wrong,
-            numbers_wrong_attempt=round_wrong_total,
             speed_ms=self.recall_time_ms if self.speed_mode_active else None,
             pattern_correct=pattern_correct,
         )
@@ -309,6 +355,12 @@ class GUIMain():
             self.memorypattern_rounds_done = getattr(self, 'memorypattern_rounds_done', 0) + 1
             setattr(self, 'memorypattern_rounds_done', self.memorypattern_rounds_done)
             if self.memorypattern_rounds_done >= 5:
+                self._finish_mode()
+                return
+        elif self.pause_mode_active:
+            self.pause_rounds_done = getattr(self, 'pause_rounds_done', 0) + 1
+            setattr(self, 'pause_rounds_done', self.pause_rounds_done)
+            if self.pause_rounds_done >= 5:
                 self._finish_mode()
                 return
         elif self.speed_mode_active:
@@ -336,6 +388,15 @@ class GUIMain():
             self.Seriallist = self.logic.generate_serial()
             self.recall_start_time = time.perf_counter()
             self._start_sequential_reveal(self._start_memorypattern)
+        elif self.pause_mode_active:
+            # Start another Pause round: show serial, then pause, then input
+            if getattr(self, 'pause_rounds_done', 0) >= 5:
+                self._finish_mode()
+                return
+            self.recall_time_ms = 5000
+            self.Seriallist = self.logic.generate_serial()
+            self.recall_start_time = time.perf_counter()
+            self._start_sequential_reveal(self._start_pause_delay)
         else:
             # Adjust speed mode timing using schedule
             if self.speed_mode_active:
@@ -362,7 +423,7 @@ class GUIMain():
             self.reveal_label = None
         self._destroy_frames("input_frame", "pattern_frame")
         # Feedback and reset controls
-        mode = "MemoryPattern" if self.memorypattern_active else ("Speed" if self.speed_mode_active else "Normal")
+        mode = "MemoryPattern" if self.memorypattern_active else ("Speed" if self.speed_mode_active else ("Pause" if self.pause_mode_active else "Normal"))
         self.feedback_label.config(text=f"{mode} completed.", fg="purple")
         self.gamemode_menu.config(state="normal")
         self.start_button.config(state="normal")
